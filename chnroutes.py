@@ -57,30 +57,22 @@ def generate_old(metric):
 
     rfile.close()
 
-def generate_linux(metric):
+def generate_linux(metric, table):
     results = fetch_ip_data()
 
     upscript_header = """\
-#!/bin/bash -
+#!/bin/sh -
 
-OLDGW=$(ip route show 0/0 | head -n1 | grep 'via' | grep -Po '\d+\.\d+\.\d+\.\d+')
-
-if [ $OLDGW == '' ]; then
-    exit 0
-fi
-
-if [ ! -e /tmp/vpn_oldgw ]; then
-    echo $OLDGW > /tmp/vpn_oldgw
-fi
+export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
+OLDGW=$(ip route show 0/0 | sed -e 's/^default//')
 
 ip -batch - <<EOF
 """
 
     downscript_header = """\
-#!/bin/bash
-export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
+#!/bin/sh
 
-OLDGW=$(cat /tmp/vpn_oldgw)
+export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
 
 ip -batch - <<EOF
 """
@@ -92,9 +84,9 @@ ip -batch - <<EOF
     downfile.write(downscript_header)
 
     for ip, _, mask in results:
-        upfile.write('route add %s/%s via $OLDGW metric %s\n' %
-                     (ip, mask, metric))
-        downfile.write('route del %s/%s\n' % (ip, mask))
+        upfile.write('route add %s/%s $OLDGW metric %s table %s\n' %
+                     (ip, mask, metric, table))
+        downfile.write('route del %s/%s table %s\n' % (ip, mask, table))
 
     upfile.write('EOF\n')
     downfile.write('''\
@@ -216,7 +208,7 @@ def main():
                  description="Generate routing rules for VPN users in China.")
     parser.add_argument('-p',
                         dest='platform',
-                        default='openvpn',
+                        default='linux',
                         nargs='?',
                         choices=['openvpn', 'old', 'mac', 'linux', 'win'],
                         help="target platform")
@@ -226,6 +218,11 @@ def main():
                         nargs='?',
                         type=int,
                         help="metric")
+    parser.add_argument('-t',
+                        dest='table',
+                        default='main',
+                        nargs='?',
+                        help="iproute2 table (linux only)")
 
     args = parser.parse_args()
 
@@ -234,7 +231,7 @@ def main():
     elif args.platform.lower() == 'old':
         generate_old(args.metric)
     elif args.platform.lower() == 'linux':
-        generate_linux(args.metric)
+        generate_linux(args.metric, args.table)
     elif args.platform.lower() == 'mac':
         generate_mac(args.metric)
     elif args.platform.lower() == 'win':
